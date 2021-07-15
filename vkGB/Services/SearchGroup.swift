@@ -33,11 +33,14 @@ class SearchGroup {
             do {
                 let arrayGroups = try JSONDecoder().decode(GroupsResponse.self, from: data)
                 var searchGroup: [Group] = []
+                
                 for i in 0...arrayGroups.response.items.count-1 {
                     let name = ((arrayGroups.response.items[i].name))
                     let logo = arrayGroups.response.items[i].logo
-                    searchGroup.append(Group.init(groupName: name, groupLogo: logo))
+                    let id = arrayGroups.response.items[i].id
+                    searchGroup.append(Group.init(groupName: name, groupLogo: logo, id: id))
                 }
+                
                 complition(searchGroup)
             } catch let error {
                 print(error)

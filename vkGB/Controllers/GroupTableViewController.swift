@@ -2,42 +2,35 @@
 import UIKit
 import RealmSwift
 import Kingfisher
+import FirebaseDatabase
 
 class GroupTableViewController: UITableViewController {
-    
     
     override func viewDidLoad() {
         super.viewDidLoad()
                 
-        loadGroupsFromRealm() // загрузка данных из реалма (кэш) для первоначального отображения
+        subscribeToNotificationRealm() // загрузка данных из реалма (кэш) для первоначального отображения
 
         // запуск обновления данных из сети, запись в Реалм и загрузка из реалма новых данных
-        GetGroupsList().loadData() { [weak self] () in
-            self?.loadGroupsFromRealm()
-        }
+        GetGroupsList().loadData()
     }
+    
+    var realm: Realm = {
+        let configrealm = Realm.Configuration(deleteRealmIfMigrationNeeded: true)
+        let realm = try! Realm(configuration: configrealm)
+        return realm
+    }()
+    
+    lazy var groupsFromRealm: Results<Group> = {
+        return realm.objects(Group.self)
+    }()
+    
+    var notificationToken: NotificationToken?
     
     var myGroups: [Group] = []
     
-//    override func viewDidLoad() {
-//        super.viewDidLoad()
-//
-//        // получение данный json в зависимости от требования
-//        GetGroupsList().loadData() { [weak self] (complition) in
-//            DispatchQueue.main.async {
-//                self?.myGroups = complition
-//                self?.tableView.reloadData()
-//            }
-//        }
-//    }
-//
-//    var myGroups: [Groups] = []
-////    var myGroups = [
-////        Groups(groupName: "Самая лучшая группа", groupLogo: UIImage(named: "group1"))
-////    ]
-    
 
-    // MARK: - Table view data source
+    // MARK: - TableView
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         return myGroups.count
@@ -49,23 +42,31 @@ class GroupTableViewController: UITableViewController {
         cell.nameGroupLabel.text = myGroups[indexPath.row].groupName
         
         if let imgUrl = URL(string: myGroups[indexPath.row].groupLogo) {
-            //let avatar = ImageResource(downloadURL: imgUrl) //работает через Kingfisher
-            //cell.avatarFriendView.avatarImage.kf.setImage(with: avatar) //работает через Kingfisher
+            let avatar = ImageResource(downloadURL: imgUrl) //работает через Kingfisher
+            cell.avatarGroupView.avatarImage.kf.indicatorType = .activity //работает через Kingfisher
+            cell.avatarGroupView.avatarImage.kf.setImage(with: avatar) //работает через Kingfisher
             
-            cell.avatarGroupView.avatarImage.load(url: imgUrl) // работает через extension UIImageView
+            //cell.avatarGroupView.avatarImage.load(url: imgUrl) // работает через extension UIImageView
         }
-        
-        
-        //let avatar = myGroups[indexPath.row].groupLogo //четко по массиву
-        //cell.avatarGroupView.avatarImage.image = avatar
         
         return cell
     }
     
     override func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
         if editingStyle == .delete {
-            myGroups.remove(at: indexPath.row)
-            tableView.deleteRows(at: [indexPath], with: .fade) // не обязательно удалять строку, если используется reloadData()
+            
+            // удаление группы из реалма + обновление таблички из Реалма
+            do {
+                try realm.write{
+                    realm.delete(groupsFromRealm.filter("groupName == %@", myGroups[indexPath.row].groupName))
+                }
+            } catch {
+                print(error)
+            }
+            
+            // удаление группы только из таблицы (не нужно, так как данные берутся из Реалма)
+            //            myGroups.remove(at: indexPath.row)
+            //            tableView.deleteRows(at: [indexPath], with: .fade) // не обязательно удалять строку, если используется reloadData()
             //tableView.reloadData()
         }
     }
@@ -74,6 +75,41 @@ class GroupTableViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
     }
+    
+    
+    // MARK: - Functions
+    
+    private func subscribeToNotificationRealm() {
+        notificationToken = groupsFromRealm.observe { [weak self] (changes) in
+            switch changes {
+            case .initial:
+                self?.loadGroupsFromRealm()
+            //case let .update (_, deletions, insertions, modifications):
+            case .update:
+                self?.loadGroupsFromRealm()
+
+                //self?.tableView.beginUpdates()
+                
+                // крашится при вызове, так как не попадает в секции, надо перерабатывать логику
+                //self?.tableView.deleteRows(at: deletions.map{ IndexPath(row: $0, section: 0) }, with: .automatic)
+                //self?.tableView.insertRows(at: insertions.map{ IndexPath(row: $0, section: 0) }, with: .automatic)
+                //self?.tableView.reloadRows(at: modifications.map{ IndexPath(row: $0, section: 0) }, with: .automatic)
+                
+                //self?.tableView.endUpdates()
+                
+
+            case let .error(error):
+                print(error)
+            }
+        }
+    }
+    
+    func loadGroupsFromRealm() {
+            myGroups = Array(groupsFromRealm)
+            guard groupsFromRealm.count != 0 else { return } // проверка, что в реалме что-то есть
+            tableView.reloadData()
+    }
+    
     
     // добавление новой группы из другого контроллера
     @IBAction func addNewGroup(segue:UIStoryboardSegue) {
@@ -87,37 +123,55 @@ class GroupTableViewController: UITableViewController {
                 let newGroup = newGroupFromController.GroupsList[indexPath.row]
                 
 //                // проверка что группа уже в списке (нужен Equatable)
-                guard !myGroups.description.contains(newGroup.groupName) else { return }
-
-                myGroups.append(newGroup)
+                guard myGroups.description.contains(newGroup.groupName) == false else { return }
                 
-                //  добавление одной новой группы в реалм
-//                do {
-//                    let realm = try Realm()
-//                    try realm.write{
-//                        realm.add(newGroup)
-//                    }
-//                } catch {
-//                    print(error)
-//                }
-//                loadGroupsFromRealm()
+                // добавить новую группу (не нужно, так как все берется из Реалма)
+                //myGroups.append(newGroup)
                 
-                tableView.reloadData()
+                //  добавление новой группы в реалм
+                do {
+                    try realm.write{
+                        realm.add(newGroup)
+                    }
+                } catch {
+                    print(error)
+                }
+                
+                writeNewGroupToFirebase(newGroup) // работа с Firebase
+                
             }
         }
     }
+
+// MARK:  - Firebase
+
+private func writeNewGroupToFirebase(_ newGroup: Group){
+    // работаем с Firebase
+    let database = Database.database()
+    // путь к нужному пользователю в Firebase (тот кто залогинился уже есть базе, другие не интересны)
+    let ref: DatabaseReference = database.reference(withPath: "All logged users").child(String(Session.instance.userId))
     
-    
-    func loadGroupsFromRealm() {
-        do {
-            let realm = try Realm()
-            let groupsFromRealm = realm.objects(Group.self)
-            myGroups = Array(groupsFromRealm)
-            guard groupsFromRealm.count != 0 else { return } // проверка, что в реалме что-то есть
-            tableView.reloadData()
-        } catch {
-            print(error)
-        }
+    // чтение из Firebase
+    ref.observe(.value) { snapshot in
+        
+        let groupsIDs = snapshot.children.compactMap { $0 as? DataSnapshot }
+            .compactMap { $0.key }
+        
+        // проверка есть ли ID группы в Firebase
+        guard groupsIDs.contains(String(newGroup.id)) == false else { return }
+
+        //ref.removeAllObservers() // отписываемся от уведомлений, чтобы не происходило изменений при изменении базы
+        ref.child(String(newGroup.id)).setValue(newGroup.groupName) // записываем новую группу в Firebase
+        
+        print("Для пользователя с ID: \(String(Session.instance.userId)) в Firebase записана группа:\n\(newGroup.groupName)")
+        
+        let groups = snapshot.children.compactMap { $0 as? DataSnapshot }
+        .compactMap { $0.value }
+        
+        print("\nРанее добавленные в Firebase группы пользователя с ID \(String(Session.instance.userId)):\n\(groups)")
+        ref.removeAllObservers() // отписываемся от уведомлений, чтобы не происходило изменений при записи в базу
     }
+}
+
 
 }

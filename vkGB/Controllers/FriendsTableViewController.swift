@@ -1,6 +1,5 @@
 
 import UIKit
-import SwiftKeychainWrapper
 import RealmSwift
 import Kingfisher
 

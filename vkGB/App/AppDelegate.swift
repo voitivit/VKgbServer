@@ -1,14 +1,24 @@
 
 
 import UIKit
+import RealmSwift
+import Firebase
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
-
+    var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Override point for customization after application launch.
+        
+        // для использования Firebase
+    
+        FirebaseApp.configure()
+        
+        // удалить БД реалм если что-то не так (например изменится струтура БД)
+         //Realm.Configuration.defaultConfiguration = Realm.Configuration(deleteRealmIfMigrationNeeded: true)
+
         return true
     }
 
@@ -28,4 +38,3 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 
 }
-
